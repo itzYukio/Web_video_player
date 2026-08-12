@@ -60,14 +60,51 @@ CREATE TABLE IF NOT EXISTS media_meta (
 `);
 
 let redis: Redis | null = null;
-const redisUrl = process.env.REDIS_URL || "";
-if (redisUrl) {
-  redis = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 2, enableOfflineQueue: false });
-  redis.on("error", e => console.error("[redis]", e.message));
-  try { await redis.connect(); await redis.ping(); } catch (e: any) {
-    console.error("[redis] unavailable:", e?.message || e);
+
+function normalizeRedisUrl(raw: string): string {
+  const value = raw.trim().replace(/^['"]|['"]$/g, "");
+  if (!value) return "";
+
+  // Coolify normally supplies redis://user:password@host:6379.
+  // Be tolerant of the common hostless form redis://user:password:6379
+  // and use REDIS_HOST (default: redis) in that case.
+  const host = (process.env.REDIS_HOST || "redis").trim();
+  const hostless = value.match(/^(redis|rediss):\/\/([^:]+):(.+):(\d+)$/i);
+  if (hostless && !value.includes("@")) {
+    const protocol = hostless[1].toLowerCase();
+    const username = hostless[2];
+    const password = hostless[3];
+    const port = hostless[4];
+    return `${protocol}://${username}:${password}@${host}:${port}`;
+  }
+
+  // Validate the URL before handing it to ioredis so a bad environment
+  // variable cannot crash the whole container and trigger a restart loop.
+  const parsed = new URL(value);
+  if (!/^redis(s)?:$/.test(parsed.protocol) || !parsed.hostname) {
+    throw new Error("REDIS_URL must use redis:// or rediss:// and include a hostname");
+  }
+  return value;
+}
+
+const redisUrlRaw = process.env.REDIS_URL || "";
+if (redisUrlRaw) {
+  try {
+    const redisUrl = normalizeRedisUrl(redisUrlRaw);
+    redis = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 2, enableOfflineQueue: false });
+    redis.on("error", e => console.error("[redis]", e.message));
+    try { await redis.connect(); await redis.ping(); console.log("[redis] connected"); } catch (e: any) {
+      console.error("[redis] unavailable:", e?.message || e);
+      redis.disconnect();
+      redis = null;
+    }
+  } catch (e: any) {
+    console.error("[redis] invalid REDIS_URL:", e?.message || e);
+    console.error("[redis] Expected: redis://username:password@host:6379");
     redis = null;
   }
+} else {
+  console.warn("[redis] REDIS_URL is not configured; authentication will be unavailable.");
 }
 
 const sessionKey = (hash: string) => `vpl:session:${hash}`;
