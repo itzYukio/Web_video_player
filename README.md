@@ -1,192 +1,274 @@
-# VPS Video Library v3
+# VPS Video Library v3 — SIMPLE COOLIFY SETUP
 
-A self-hosted, authenticated video library for a VPS-mounted media directory, designed for deployment with Coolify.
+This guide is written for the Coolify screen you are using.
 
-## What changed in v3
+**Important:** this project already contains a `Dockerfile`. Do **not** use Nixpacks.
 
-v3 adds **browser-aware video delivery**.
-
-Instead of assuming that every file can be played directly by the browser:
-
-1. The application identifies the browser/session from the request's User-Agent.
-2. It probes the source with `ffprobe`.
-3. If the source is already compatible with the selected browser profile, it is streamed directly.
-4. If it is not compatible, FFmpeg converts it to a cached browser-friendly format.
-5. The converted file is then served with normal HTTP Range requests, so seeking works.
-6. The converted result is reused on future plays until the source file changes.
-
-### Browser profiles
-
-| Browser/session | Target when conversion is needed |
-|---|---|
-| iPhone/iPad/Safari | H.264 + AAC in MP4 |
-| Chrome/Chromium/Edge | VP9 + Opus in WebM |
-| Firefox | VP9 + Opus in WebM |
-| Unknown browser | H.264 + AAC in MP4 |
-
-H.264/AAC MP4 is used as the universal fallback because it has the broadest browser/device compatibility.
-
-> Conversion is intentionally cached. The first play of a file that needs conversion can take time and consume CPU/disk. Later plays use the cached output.
-
-## v3 feature list
-
-- Username/password authentication
-- Redis-backed sessions
-- HttpOnly authentication cookies
-- Login rate limiting
-- bcrypt password hashing
-- Persistent SQLite database
-- Redis playback/resume state
-- Continue Watching
-- Watch History
-- Favorites
-- Recursive folder navigation
-- Automatic episode detection
-- Previous/Next episode navigation
-- Automatic thumbnails using FFmpeg
-- Thumbnail cache
-- SRT subtitle support
-- VTT subtitle support
-- SRT → VTT conversion/cache
-- Custom subtitle selector
-- Browser-aware transcoding
-- Transcoding cache
-- HTTP Range streaming
-- Direct streaming for already-compatible files
-- Read-only media mount support
-- Responsive UI
-- Coolify Dockerfile deployment
-
----
-
-# 1. Architecture
+## 1. What you are setting up
 
 ```text
-                         Internet
-                            │
-                            ▼
-                  ┌─────────────────────┐
-                  │       NGINX         │
-                  │  your domain :443   │
-                  └──────────┬──────────┘
-                             │ proxy_pass
-                             ▼
-                  ┌─────────────────────┐
-                  │       Coolify       │
-                  │  Application Proxy  │
-                  └──────────┬──────────┘
-                             │
-                             ▼
-              ┌─────────────────────────────┐
-              │ VPS Video Library container │
-              │            :3000             │
-              └──────┬─────────┬────────────┘
-                     │         │
-             ┌───────▼───┐ ┌──▼─────────────┐
-             │   /media  │ │     /data      │
-             │ VPS videos │ │ DB/cache/state │
-             └───────────┘ └──┬──────────────┘
-                              │
-                    ┌─────────┼──────────┐
-                    ▼         ▼          ▼
-                 SQLite    thumbnails  transcoded
-                    │
-                    ▼
-                 Redis
-              sessions/progress
+Internet
+   ↓
+your-domain.com
+   ↓
+Coolify (or your NGINX → Coolify)
+   ↓
+Video Library container
+   ├── /media → your existing VPS video folder
+   ├── /data  → database + thumbnails + converted videos
+   └── Redis  → sessions + playback state
 ```
 
-### Important
-
-You do **not** need to expose the application's internal port directly to the Internet.
-
-The application listens on port `3000` inside its container.
-
-NGINX can reverse proxy your domain to the Coolify-exposed application port, or you can use Coolify's built-in proxy.
+The app listens **inside the container on port `3000`**.
 
 ---
 
-# 2. Requirements
+# 2. Put the project on GitHub
 
-You need:
+Create a repository and upload the contents of this ZIP.
 
-- A Linux VPS
-- Coolify installed
-- Docker available to Coolify
-- A domain/subdomain
-- Your video directory on the VPS
-- Redis
-- Enough disk space for generated thumbnails and transcoded videos
-- Enough CPU for FFmpeg when conversion is required
+The repository root should contain:
 
-For large libraries, SSD storage is strongly recommended.
+```text
+Dockerfile
+package.json
+server/
+client/
+index.html
+vite.config.ts
+tsconfig.json
+.env.example
+README.md
+```
 
 ---
 
-# 3. Recommended directory layout
+# 3. Create the Coolify application
+
+In Coolify:
+
+```text
+Project
+→ Environment
+→ Create New Resource
+→ Application
+→ Public Repository
+```
+
+Select your GitHub repository.
+
+Then open:
+
+```text
+Configuration → General
+```
+
+---
+
+# 4. Change Build Pack
+
+Your screenshot currently shows:
+
+```text
+Build Pack: Nixpacks
+```
+
+Change it to:
+
+```text
+Build Pack: Dockerfile
+```
+
+This is important because this project needs its own Dockerfile. Coolify supports Dockerfile applications directly. citeturn0search6turn0search12
+
+After selecting Dockerfile:
+
+```text
+Base Directory: /
+```
+
+If a Dockerfile path field is shown:
+
+```text
+/Dockerfile
+```
+
+Leave these empty:
+
+```text
+Install Command
+Build Command
+Start Command
+Publish Directory
+```
+
+The Dockerfile already contains those instructions.
+
+---
+
+# 5. Fix the port
+
+Your screenshot currently shows:
+
+```text
+Ports Exposes: 3004
+```
+
+Change it to:
+
+```text
+3000
+```
+
+The application listens on port 3000 inside its container.
+
+Coolify uses `Ports Exposes` to know which port the application listens on. citeturn0search1
+
+For the simplest setup:
+
+```text
+Ports Exposes:
+3000
+
+Port Mappings:
+EMPTY
+```
+
+You do **not** need `3004:3000` if Coolify's proxy is handling your domain.
+
+---
+
+# 6. Create Redis
+
+In the same Coolify project/environment:
+
+```text
+Create New Resource
+→ Redis
+```
+
+Use the normal/default Redis configuration.
+
+Do **not** expose Redis publicly.
+
+The video application and Redis should be in the same Coolify environment/network so the app can use Redis internally.
+
+---
+
+# 7. Add environment variables
+
+Open:
+
+```text
+Configuration
+→ Environment Variables
+```
+
+Add:
+
+```text
+MEDIA_ROOT=/media
+DATA_ROOT=/data
+PORT=3000
+HOST=0.0.0.0
+SESSION_TTL=2592000
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=YOUR_LONG_RANDOM_PASSWORD
+```
+
+For:
+
+```text
+REDIS_URL
+```
+
+use the **internal Redis URL shown by your Coolify Redis resource**.
+
+It may look similar to:
+
+```text
+redis://redis:6379
+```
+
+but use the value Coolify actually provides.
+
+Your password should be at least 12 characters.
+
+---
+
+# 8. Add your video directory
+
+This is the part that connects the application to your existing VPS videos.
+
+Go to:
+
+```text
+Configuration
+→ Persistent Storage
+→ + Add
+```
+
+Create a **Directory / Bind Mount**.
+
+### Source Path
+
+Enter the real path of your videos on the VPS.
 
 For example:
 
 ```text
-/opt/media/
-├── Movies/
-├── Anime/
-├── TV Shows/
-├── Courses/
-└── Other/
+/home/ubuntu/videos
 ```
 
-Your actual location can be anywhere.
+This is only an example. Use the actual directory containing your videos.
 
-For example:
+### Destination Path
 
-```text
-/mnt/storage/videos
-```
-
-The application does not require the videos to be copied into the Docker image.
-
-The host directory is mounted into the container as:
+Enter exactly:
 
 ```text
 /media
 ```
 
----
-
-# 4. Get the project
-
-You can deploy the project from GitHub, GitLab, a private repository, or another Git source supported by Coolify.
-
-Recommended Git layout:
+So it becomes:
 
 ```text
-vps-video-library/
-├── Dockerfile
-├── package.json
-├── package-lock.json
-├── tsconfig.json
-├── vite.config.ts
-├── index.html
-├── README.md
-├── .dockerignore
-├── .env.example
-├── server/
-│   └── index.ts
-└── client/
-    └── src/
-        ├── App.tsx
-        ├── main.tsx
-        └── styles.css
+Source Path:
+YOUR_REAL_VIDEO_DIRECTORY
+
+Destination Path:
+/media
 ```
+
+Coolify's bind mounts use a host `Source Path` and container `Destination Path`. citeturn0search0
+
+**Do not put `/media` as the source unless your videos really are stored at `/media` on the VPS.**
 
 ---
 
-# 5. Create a persistent data directory/volume
+# 9. Add persistent application storage
 
-This step is important.
+Add another storage entry.
 
-The application stores:
+Choose:
+
+```text
+Volume
+```
+
+Name:
+
+```text
+video-library-data
+```
+
+Destination:
+
+```text
+/data
+```
+
+This stores:
 
 ```text
 /data/library.db
@@ -195,331 +277,439 @@ The application stores:
 /data/transcoded/
 ```
 
-Therefore `/data` must survive container recreation.
+Your screenshot already shows a `/data` directory. **Keep that.**
 
-If `/data` is not persistent, you will lose:
+The `/data` storage must be persistent, otherwise the database and caches can disappear when the container is recreated. Coolify supports persistent Docker volumes for this purpose. citeturn0search0
 
-- users
-- favorites
-- watch history
-- thumbnail cache
-- subtitle conversion cache
-- transcoding cache
+---
 
-### Recommended Coolify storage
+# 10. Your storage should look like this
 
-Create a persistent volume for the application and mount it at:
+You should end up with two entries:
 
 ```text
+1. VIDEO DIRECTORY
+
+Source:
+YOUR_REAL_VIDEO_DIRECTORY
+
+Destination:
+/media
+```
+
+and:
+
+```text
+2. APPLICATION DATA
+
+Volume:
+video-library-data
+
+Destination:
 /data
 ```
 
-Do not mount your media directory at `/data`.
-
 ---
 
-# 6. Mount the VPS video directory
+# 11. Domain
 
-In Coolify, open the application's **Storages / Persistent Storage** configuration.
+The easiest setup is to let Coolify handle your domain and HTTPS.
 
-Add a host/bind mount.
-
-Example:
+In:
 
 ```text
-Host path:
-/opt/media
-
-Container path:
-/media
+Configuration
+→ General
+→ Domains
 ```
 
-If your videos are here:
+enter:
 
 ```text
-/mnt/storage/videos
+https://video.example.com
 ```
 
-use:
+Replace `video.example.com` with your real domain.
 
-```text
-Host path:
-/mnt/storage/videos
-
-Container path:
-/media
-```
-
-### Make the media mount read-only
-
-The application only needs to read videos.
-
-If your Coolify/storage configuration supports a read-only option, enable it.
-
-The application never needs to modify the original media files.
-
----
-
-# 7. Redis
-
-Redis is required for authentication sessions.
-
-It also stores fast playback state.
-
-Create a Redis service in Coolify.
-
-The application and Redis should be on the same Coolify network/environment so the application can use Redis's internal hostname.
+Then point your DNS record to the VPS running Coolify.
 
 For example:
 
-```env
-REDIS_URL=redis://redis:6379
+```text
+Type: A
+Name: video
+Value: YOUR_VPS_PUBLIC_IP
 ```
 
-The exact hostname may be different depending on the Redis resource name shown by Coolify.
+If you use Cloudflare, the DNS record can point to the VPS as normal.
 
-Use the internal Redis connection URL supplied by Coolify.
+**You do not need external NGINX for the first deployment.**
 
-Do **not** expose Redis publicly.
-
-The application should communicate with Redis internally.
+Get the application working through Coolify first.
 
 ---
 
-# 8. Create the Coolify application
+# 12. Save and deploy
 
-In Coolify:
-
-1. Open your project.
-2. Open the desired environment.
-3. Click **Create New Resource**.
-4. Select **Application**.
-5. Select your Git repository.
-6. Select the appropriate branch.
-7. Select **Dockerfile** as the build pack.
-8. Set the base directory to `/` if the Dockerfile is at the repository root.
-9. Deploy/configure the application.
-
-Coolify's Dockerfile build pack uses your Dockerfile to build the application image.
-
----
-
-# 9. Configure the application port
-
-The application listens on:
+At this point your important Coolify settings should be:
 
 ```text
+Build Pack:
+Dockerfile
+
+Base Directory:
+/
+
+Ports Exposes:
 3000
-```
 
-Set Coolify's application port/exposed port to:
+Port Mappings:
+(empty)
 
-```text
-3000
-```
-
-Do not change the Dockerfile's exposed port unless you also change:
-
-```env
-PORT=3000
-```
-
-to the new value.
-
-Coolify uses the exposed application port for routing.
-
----
-
-# 10. Environment variables
-
-Add these to the Coolify application.
-
-```env
-NODE_ENV=production
-
-PORT=3000
-HOST=0.0.0.0
-
+Environment:
 MEDIA_ROOT=/media
 DATA_ROOT=/data
-
-REDIS_URL=redis://redis:6379
-
+PORT=3000
+HOST=0.0.0.0
+REDIS_URL=your-internal-redis-url
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=REPLACE_WITH_A_LONG_RANDOM_PASSWORD
-
+ADMIN_PASSWORD=your-password
 SESSION_TTL=2592000
 
-VIDEO_EXTENSIONS=mp4,mkv,webm,m4v,mov,avi,ts,mts,m2ts
-
-THUMB_WIDTH=640
+Storage:
+/your/video/folder → /media
+video-library-data → /data
 ```
 
-### Important
-
-Change:
-
-```env
-ADMIN_PASSWORD=REPLACE_WITH_A_LONG_RANDOM_PASSWORD
-```
-
-before the first deployment.
-
-Use a long random password.
-
-Example:
+Now:
 
 ```text
-not-this-password
+Save
+→ Deploy
 ```
-
-Do not use a weak password like the example above.
 
 ---
 
-# 11. First administrator
+# 13. Check the deployment
 
-On first startup, the application checks SQLite.
+Open:
 
-If there are no users, it creates:
+```text
+Deployments
+→ latest deployment
+→ Logs
+```
+
+You want to see something similar to:
+
+```text
+VPS Video Library v3 listening on 0.0.0.0:3000
+```
+
+If you see that, the application has started.
+
+---
+
+# 14. First login
+
+Open your domain.
+
+You should see the login page.
+
+Use the credentials you put into:
 
 ```text
 ADMIN_USERNAME
 ADMIN_PASSWORD
 ```
 
-as the first account.
+---
+
+# 15. Test before using your entire library
+
+For your first test, put a few files in the mounted video folder:
+
+```text
+Test/
+├── Test.mp4
+├── Test.mkv
+├── Test S01E01.mkv
+├── Test S01E02.mkv
+├── Test.en.srt
+└── Test.en.vtt
+```
+
+Then check:
+
+```text
+✓ Login
+✓ Folder navigation
+✓ Thumbnail
+✓ MP4 playback
+✓ MKV playback/transcoding
+✓ Resume
+✓ Continue Watching
+✓ Favorites
+✓ Watch History
+✓ SRT subtitles
+✓ VTT subtitles
+✓ Episode detection
+✓ Next episode
+```
+
+Only after that should you point `/media` at your complete library.
+
+---
+
+# 16. How video conversion works
+
+You do **not** need to manually convert your videos.
+
+When a video is requested:
+
+```text
+Browser requests video
+        ↓
+Application detects browser
+        ↓
+Checks video format/codec
+        ↓
+Compatible?
+   ┌────┴────┐
+  YES       NO
+   ↓         ↓
+Direct     FFmpeg
+stream     conversion
+             ↓
+          cache result
+             ↓
+          stream result
+```
+
+Compatible videos are streamed directly.
+
+Incompatible videos are converted to a browser-friendly format.
+
+The converted files are stored in:
+
+```text
+/data/transcoded/
+```
+
+The same source/browser combination can then reuse the cached conversion.
+
+---
+
+# 17. Why transcoding can use a lot of CPU
 
 For example:
 
-```env
-ADMIN_USERNAME=tanmay
-ADMIN_PASSWORD=<strong random password>
+```text
+H.264 MP4
+→ direct playback
+→ very little transcoding CPU
 ```
 
-After the first successful startup, the account is stored in SQLite.
+but:
 
-Changing `ADMIN_PASSWORD` in Coolify later does **not** overwrite the existing database account.
+```text
+HEVC/H.265 MKV
+→ H.264/AAC conversion
+→ significant CPU usage
+```
 
-If you forget the password, use the application's password-management/recovery procedure you establish for your deployment rather than deleting the database.
+Several simultaneous incompatible videos can therefore use a lot of CPU.
+
+For a personal library this is normally fine, but keep this in mind on a small VPS.
 
 ---
 
-# 12. Domain configuration — recommended Coolify method
+# 18. Subtitles
 
-The simplest setup is to let Coolify's reverse proxy handle the domain.
-
-For example, suppose you want:
+Put subtitles next to the video:
 
 ```text
-https://videos.example.com
+Movie.mkv
+Movie.en.srt
+Movie.hi.srt
+Movie.ja.vtt
 ```
 
-Create DNS:
+The player automatically discovers them.
+
+The player will provide a subtitle selector such as:
 
 ```text
-Type: A
-Name: videos
-Value: YOUR_SERVER_IP
+CC Off
+EN
+HI
+JA
 ```
-
-If using Cloudflare, configure the record appropriately for your setup.
-
-Then in Coolify's domain field use:
-
-```text
-https://videos.example.com
-```
-
-Coolify supports FQDNs and automatically configures its reverse proxy and HTTPS when an HTTPS domain is configured.
-
-This is the **recommended method** if you do not specifically need a separate NGINX proxy.
 
 ---
 
-# 13. If you specifically want NGINX in front
+# 19. Episode detection
 
-You said you want to use your own NGINX reverse proxy.
-
-In that case the architecture becomes:
+These patterns are recognized:
 
 ```text
-Browser
-   │
-   │ https://videos.example.com
-   ▼
+Show S01E01.mkv
+Show S01E02.mkv
+Show S01E03.mkv
+```
+
+Also:
+
+```text
+Show 1x01.mkv
+Show 1x02.mkv
+```
+
+And:
+
+```text
+Show Episode 01.mkv
+Show Episode 02.mkv
+```
+
+The application automatically sorts detected episodes and provides Previous/Next controls.
+
+---
+
+# 20. Continue Watching
+
+Playback position is saved automatically.
+
+For example:
+
+```text
+Movie
+████████████░░░░ 72%
+```
+
+Open the movie again and it resumes around the saved position.
+
+Redis stores the fast playback/session state, while SQLite stores the durable user/history information.
+
+---
+
+# 21. Favorites
+
+While watching a video, press:
+
+```text
+♡ Add to favorites
+```
+
+It then appears under:
+
+```text
+Favorites
+```
+
+---
+
+# 22. Watch History
+
+The application stores:
+
+```text
+Video
+Last watched time
+Playback position
+Duration
+Completion status
+```
+
+History is stored in:
+
+```text
+/data/library.db
+```
+
+---
+
+# 23. If you want NGINX in front
+
+**Do this only after the Coolify version works.**
+
+The simplest and recommended first deployment is:
+
+```text
+Internet
+ ↓
+Coolify proxy
+ ↓
+Video Library
+```
+
+You originally asked for:
+
+```text
+Internet
+ ↓
 NGINX
-   │
-   │ proxy_pass
-   ▼
-Coolify application
-   │
-   │ :YOUR_COOLIFY_PORT
-   ▼
-VPS Video Library
+ ↓
+Coolify
+ ↓
+Video Library
 ```
 
-There are two important things to understand.
+That is also possible.
 
-## Option A — NGINX → host port
+If you want this setup, you need a host port.
 
-If Coolify maps the application to a host port, for example:
-
-```text
-127.0.0.1:3210
-```
-
-then NGINX can proxy to:
+For example:
 
 ```text
-http://127.0.0.1:3210
-```
-
-This is the cleanest approach when using a manually managed NGINX.
-
-Configure the application to listen internally on:
-
-```text
+Container port:
 3000
+
+Host port:
+3004
 ```
 
-and map:
+In Coolify this can be:
 
 ```text
-3210:3000
+Ports Exposes:
+3000
+
+Port Mappings:
+127.0.0.1:3004:3000
 ```
 
-Only expose that port locally if possible.
+The important difference is:
 
-Then NGINX uses:
+```text
+3000 = application/container port
 
-```nginx
-proxy_pass http://127.0.0.1:3210;
+3004 = VPS/host port
 ```
+
+Coolify documents host port mappings as `host:container`; direct port mappings are separate from proxy-based domain routing. citeturn0search1
 
 ---
 
-# 14. NGINX configuration
+# 24. NGINX configuration
 
-Create a server configuration such as:
+On the VPS:
 
-```text
-/etc/nginx/sites-available/videos.example.com
+```bash
+sudo nano /etc/nginx/sites-available/video-library
 ```
 
-Example:
+Put:
 
 ```nginx
 server {
     listen 80;
-    listen [::]:80;
-
-    server_name videos.example.com;
+    server_name video.example.com;
 
     client_max_body_size 0;
 
     location / {
-        proxy_pass http://127.0.0.1:3210;
+        proxy_pass http://127.0.0.1:3004;
 
         proxy_http_version 1.1;
 
@@ -532,38 +722,30 @@ server {
 
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
-        send_timeout 3600s;
     }
 }
 ```
 
-### Why these settings matter
-
-Video streaming is different from normal websites.
-
-The browser uses:
+Change:
 
 ```text
-Range: bytes=...
+video.example.com
 ```
 
-requests to seek through videos.
+to your domain.
 
-The application supports these Range requests.
+Change:
 
-Long timeouts also prevent NGINX from prematurely terminating slow/long video operations.
+```text
+3004
+```
 
-`proxy_buffering off` prevents NGINX from unnecessarily buffering the streamed response.
+if you chose another host port.
 
----
-
-# 15. Enable the NGINX configuration
-
-On a standard Debian/Ubuntu NGINX installation:
+Enable it:
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/videos.example.com \
-/etc/nginx/sites-enabled/videos.example.com
+sudo ln -s /etc/nginx/sites-available/video-library /etc/nginx/sites-enabled/video-library
 ```
 
 Test:
@@ -572,7 +754,7 @@ Test:
 sudo nginx -t
 ```
 
-If it says the configuration is valid:
+If it says the configuration is OK:
 
 ```bash
 sudo systemctl reload nginx
@@ -580,15 +762,9 @@ sudo systemctl reload nginx
 
 ---
 
-# 16. HTTPS
+# 25. HTTPS with NGINX
 
-Do not expose the login page over plain HTTP.
-
-Use HTTPS.
-
-If NGINX is responsible for TLS, you can use Certbot.
-
-Typical setup:
+Install Certbot:
 
 ```bash
 sudo apt update
@@ -598,859 +774,201 @@ sudo apt install certbot python3-certbot-nginx
 Then:
 
 ```bash
-sudo certbot --nginx -d videos.example.com
+sudo certbot --nginx -d video.example.com
 ```
 
-Follow the prompts.
-
-Afterwards your traffic should be:
+After it finishes, use:
 
 ```text
-https://videos.example.com
+https://video.example.com
 ```
-
-and NGINX should forward it to the Coolify application.
 
 ---
 
-# 17. Cloudflare
-
-If your domain is behind Cloudflare, you can use:
-
-```text
-Browser
-   ↓ HTTPS
-Cloudflare
-   ↓ HTTPS
-NGINX
-   ↓ HTTP
-Coolify
-```
-
-For a secure setup, preferably use HTTPS between Cloudflare and NGINX as well.
-
-Do not disable authentication just because Cloudflare is protecting the domain.
-
-The application's own authentication remains the actual access control.
-
----
-
-# 18. Important proxy configuration for video streaming
-
-Make sure your NGINX configuration does not impose a tiny response limit.
+# 26. If using NGINX, do NOT expose the Coolify port publicly
 
 Use:
 
-```nginx
-client_max_body_size 0;
+```text
+127.0.0.1:3004:3000
 ```
 
-and:
-
-```nginx
-proxy_buffering off;
-proxy_read_timeout 3600s;
-proxy_send_timeout 3600s;
-send_timeout 3600s;
-```
-
-The application itself sends:
+not:
 
 ```text
-Accept-Ranges: bytes
+0.0.0.0:3004:3000
 ```
 
-and handles:
-
-```text
-206 Partial Content
-```
-
-responses.
-
-This is what allows browser seeking.
+The first keeps the application reachable only from the VPS itself, where NGINX can access it.
 
 ---
 
-# 19. How automatic transcoding works
+# 27. Do not expose Redis
 
-Suppose you upload:
+Never expose Redis to the public Internet.
 
-```text
-Movie.mkv
-```
-
-with:
+Do not open:
 
 ```text
-HEVC / H.265
-10-bit video
-DTS audio
+6379
 ```
 
-and the current browser cannot decode it.
+in your firewall.
 
-The application does:
-
-```text
-Movie.mkv
-     │
-     ▼
-ffprobe
-     │
-     ├── Browser-compatible? ── YES ──► Direct stream
-     │
-     └── NO
-          │
-          ▼
-       FFmpeg
-          │
-          ▼
- Browser-specific cached format
-```
-
-For Safari/iPhone:
-
-```text
-H.264
-AAC
-MP4
-```
-
-For Chromium/Firefox:
-
-```text
-VP9
-Opus
-WebM
-```
-
-The converted file is cached in:
-
-```text
-/data/transcoded/
-```
+The video application talks to Redis internally.
 
 ---
 
-# 20. Why we cache transcoded files
+# 28. If Coolify says "Exited"
 
-Without caching, this would happen:
-
-```text
-Open video
-    ↓
-FFmpeg starts
-    ↓
-watch
-
-Close video
-
-Open again
-    ↓
-FFmpeg starts again
-```
-
-That would waste CPU continuously.
-
-Instead:
-
-```text
-First play
-   ↓
-FFmpeg
-   ↓
-/data/transcoded/<hash>.mp4
-```
-
-Next play:
-
-```text
-Open video
-   ↓
-Cached file
-   ↓
-Instant streaming
-```
-
-If the source video's:
-
-- path
-- size
-- modification time
-- browser target profile
-
-changes, a new cache key is generated.
-
----
-
-# 21. Transcoding CPU considerations
-
-This feature is intentionally CPU-heavy when a file needs conversion.
-
-For example, converting:
-
-```text
-4K HEVC → 1080p H.264
-```
-
-can consume significant CPU.
-
-The current implementation preserves the source resolution.
-
-Therefore a 4K source may become a 4K H.264 file.
-
-For a future optimization, you can add profiles such as:
-
-```text
-1080p
-720p
-480p
-```
-
-and adaptive streaming using HLS/DASH.
-
-That would be the next major evolution if your library contains many 4K videos.
-
----
-
-# 22. Transcoding storage
-
-Transcoded files can become large.
-
-Example:
-
-```text
-Original:
-10 GB MKV
-
-Generated:
-6 GB MP4
-```
-
-The original remains untouched.
-
-The cache may therefore consume additional storage.
-
-Monitor:
-
-```bash
-du -sh /path/to/coolify-data
-```
-
-and specifically:
-
-```bash
-du -sh /data/transcoded
-```
-
-Do not manually delete `/data/library.db`.
-
-If you need to reclaim transcoding storage, the files under:
-
-```text
-/data/transcoded/
-```
-
-can be deleted. They will be regenerated when required.
-
-Likewise thumbnails can be regenerated.
-
----
-
-# 23. Thumbnail generation
-
-When a video appears in the UI:
-
-```text
-/api/thumb?path=...
-```
-
-the application checks the thumbnail cache.
-
-If it doesn't exist:
-
-```text
-FFmpeg
-   ↓
-first suitable frame
-   ↓
-JPEG
-   ↓
-/data/thumbs/
-```
-
-The thumbnail is then reused.
-
----
-
-# 24. Subtitles
-
-Matching subtitles can be placed next to the video.
-
-Example:
-
-```text
-Anime/
-└── Episode 01/
-    ├── Episode 01.mkv
-    ├── Episode 01.en.srt
-    ├── Episode 01.hi.srt
-    └── Episode 01.ja.vtt
-```
-
-The player detects them automatically.
-
-The CC menu will show:
-
-```text
-CC Off
-EN
-HI
-JA
-```
-
-SRT files are converted to WebVTT automatically because browsers natively consume WebVTT through the HTML video track API.
-
----
-
-# 25. Episode detection
-
-The application understands:
-
-```text
-Show.S01E01.mkv
-Show.S01E02.mkv
-Show.S01E03.mkv
-```
-
-and:
-
-```text
-Show.1x01.mkv
-Show.1x02.mkv
-```
-
-and:
-
-```text
-Episode 01.mkv
-Episode 02.mkv
-```
-
-Episodes are sorted by:
-
-```text
-Season
-   ↓
-Episode
-```
-
-The player also provides:
-
-```text
-Previous
-Current episode
-Next
-```
-
----
-
-# 26. Continue Watching
-
-Playback progress is saved approximately every 10 seconds and when the video pauses/leaves.
-
-The database records:
-
-```text
-video
-position
-duration
-last watched time
-completed state
-```
-
-Redis additionally holds the fast resume state.
-
-A video is considered completed around the final 5% of its duration.
-
-Completed videos therefore disappear from Continue Watching while remaining in Watch History.
-
----
-
-# 27. Favorites
-
-Favorites are stored in SQLite.
-
-They are tied to the authenticated user:
-
-```text
-User A
- ├── Favorite 1
- └── Favorite 2
-
-User B
- ├── Favorite 3
- └── Favorite 4
-```
-
-This means adding multiple users later does not require redesigning the database.
-
----
-
-# 28. Authentication security
-
-The application uses:
-
-- bcrypt password hashing
-- random session tokens
-- Redis session storage
-- HttpOnly cookies
-- SameSite cookies
-- Secure cookies in production
-- login rate limiting
-
-The media endpoints require authentication too.
-
-That includes:
-
-```text
-/stream
-/api/thumb
-/subtitles
-/api/*
-```
-
-So someone cannot simply discover the media URL and bypass the login.
-
----
-
-# 29. Firewall
-
-If NGINX is directly handling the domain, you generally only need:
-
-```text
-80
-443
-```
-
-publicly accessible for the website.
-
-The Coolify application port should preferably not be publicly exposed if NGINX is the only intended entry point.
-
-For example:
-
-```text
-Internet
-  ↓
-443
-  ↓
-NGINX
-  ↓
-127.0.0.1:3210
-  ↓
-Coolify
-  ↓
-container:3000
-```
-
-This is preferable to:
-
-```text
-Internet
-  ↓
-3210
-  ↓
-Coolify
-```
-
-because the latter exposes the application directly.
-
----
-
-# 30. Verify the application
-
-After deployment, first check:
-
-```text
-https://videos.example.com
-```
-
-You should see the login page.
-
-Log in using:
-
-```text
-ADMIN_USERNAME
-ADMIN_PASSWORD
-```
-
-Then check:
-
-### Library
-
-Your `/media` contents should appear.
-
-### Thumbnail
-
-Open a video folder and wait for thumbnails.
-
-### Player
-
-Open a video.
-
-### Resume
-
-Watch for a while, close it, reopen it.
-
-It should resume near the previous position.
-
-### Favorite
-
-Click:
-
-```text
-♡ Add to favorites
-```
-
-Then open Favorites.
-
-### History
+Do not change random settings.
 
 Open:
 
 ```text
-Watch History
+Deployments
+→ latest deployment
+→ Logs
 ```
 
-### Subtitle
+Look at the final error.
 
-Put an `.srt` next to a video and reopen the video.
+Common causes:
 
-The CC selector should appear.
+### `ADMIN_PASSWORD` error
 
-### Transcoding
+Make sure it is at least 12 characters.
 
-Use a browser-incompatible video.
-
-The first play should trigger FFmpeg.
-
-Check the application logs:
-
-```text
-[transcode] ...
-```
-
-Then play it again.
-
-The second playback should use the cached conversion.
-
----
-
-# 31. Check container logs
-
-In Coolify, open:
-
-```text
-Application → Logs
-```
-
-You should see something similar to:
-
-```text
-VPS Video Library v3 listening on 0.0.0.0:3000
-[auth] created initial user: admin
-```
-
-When transcoding occurs:
-
-```text
-[transcode] Movies/example.mkv -> safari-h264
-```
-
-or:
-
-```text
-[transcode] Anime/example.mkv -> chromium-vp9
-```
-
----
-
-# 32. Useful VPS checks
-
-Check disk:
-
-```bash
-df -h
-```
-
-Check media size:
-
-```bash
-du -sh /your/media/path
-```
-
-Check transcoding cache:
-
-```bash
-du -sh /path/to/coolify-data/transcoded
-```
-
-Check thumbnails:
-
-```bash
-du -sh /path/to/coolify-data/thumbs
-```
-
-Check Docker:
-
-```bash
-docker ps
-```
-
-Check NGINX:
-
-```bash
-sudo nginx -t
-```
-
----
-
-# 33. Troubleshooting
-
-## Login says Redis unavailable
+### Redis error
 
 Check:
 
-```env
-REDIS_URL=redis://redis:6379
+```text
+REDIS_URL
 ```
 
-and make sure the Redis service is running.
+and make sure Redis is running.
 
-The Redis hostname must be the internal Coolify service hostname.
+### `/media` empty
 
----
-
-## Library is empty
-
-Check the mount.
-
-Inside the container, `/media` should contain your videos.
-
-Use the Coolify terminal and run:
-
-```bash
-ls -lah /media
-```
-
-Then:
-
-```bash
-find /media -maxdepth 2 -type f | head
-```
-
-If nothing appears, your storage mount is incorrect.
-
----
-
-## Thumbnail doesn't appear
-
-Check FFmpeg:
-
-```bash
-ffmpeg -version
-```
-
-The supplied Dockerfile installs FFmpeg automatically.
-
----
-
-## Video keeps transcoding
-
-Check:
-
-```bash
-du -sh /data/transcoded
-```
-
-If `/data` isn't persistent, every container recreation will remove the cache.
-
-Make sure `/data` is a persistent Coolify storage volume.
-
----
-
-## Video starts but seeking doesn't work
-
-Check that NGINX contains:
-
-```nginx
-proxy_buffering off;
-proxy_read_timeout 3600s;
-proxy_send_timeout 3600s;
-```
-
-The application supports HTTP Range requests.
-
----
-
-## 502 Bad Gateway
-
-Check:
-
-```bash
-sudo nginx -t
-```
-
-Then verify that your Coolify host port is actually listening:
-
-```bash
-ss -lntp
-```
-
-For example, if NGINX uses:
-
-```nginx
-proxy_pass http://127.0.0.1:3210;
-```
-
-then port `3210` must be mapped to the application's container port `3000`.
-
----
-
-# 34. Recommended production layout
-
-For your use case, I recommend:
+Check the Persistent Storage bind mount:
 
 ```text
-                    videos.yourdomain.com
-                              │
-                              ▼
-                         Cloudflare
-                              │
-                              ▼
-                         NGINX :443
-                              │
-                              ▼
-                     127.0.0.1:3210
-                              │
-                              ▼
-                    Coolify application
-                              │
-                  ┌───────────┼───────────┐
-                  ▼           ▼           ▼
-               /media       /data       Redis
-                  │           │
-                  │       ┌───┼────┐
-                  │       ▼   ▼    ▼
-                  │      DB thumbs transcodes
-                  │
-             Your original
-               videos
+Source = real VPS video directory
+Destination = /media
 ```
 
-This keeps the media directory outside the application image, keeps application state persistent, and prevents Redis from being exposed publicly.
+### Build fails
 
----
-
-# 35. Important performance recommendation
-
-For a large library, do **not** pre-convert every video.
-
-That could consume hundreds of GB or even TB.
-
-Use the current cache-on-demand approach:
+Make sure:
 
 ```text
-Video requested
-      ↓
-Is browser compatible?
-   ↙       ↘
- YES       NO
-  ↓         ↓
-Direct    Convert
-stream      ↓
-          Cache
-            ↓
-          Stream
+Build Pack = Dockerfile
 ```
 
-This means you only spend CPU/storage on videos that you actually watch.
+not Nixpacks.
 
----
+### Application starts but cannot open
 
-# 36. Future upgrade path
-
-The next major improvement after this version would be:
+Make sure:
 
 ```text
-HLS / MPEG-DASH
-+
-1080p / 720p / 480p
-+
-adaptive bitrate
-+
-hardware acceleration
+Ports Exposes = 3000
 ```
 
-That would allow:
+---
+
+# 29. The exact changes needed on your current Coolify screen
+
+From your screenshots:
+
+### Change this:
 
 ```text
-4K original
-     │
-     ├── 1080p
-     ├── 720p
-     └── 480p
-          ↓
-    Adaptive streaming
-          ↓
-     Browser chooses
-     appropriate quality
+Build Pack
+Nixpacks
 ```
 
-That is significantly better than converting an entire 4K file to another full-resolution file, especially when watching from an iPhone or over a slower connection.
+to:
+
+```text
+Dockerfile
+```
+
+### Change this:
+
+```text
+Ports Exposes
+3004
+```
+
+to:
+
+```text
+3000
+```
+
+### Change this:
+
+```text
+Port Mappings
+3000:3000
+```
+
+to:
+
+```text
+EMPTY
+```
+
+for the simple Coolify-proxy setup.
+
+### Keep this:
+
+```text
+Persistent Storage
+Destination:
+/data
+```
+
+Then add your actual video directory:
+
+```text
+YOUR_VIDEO_DIRECTORY → /media
+```
 
 ---
 
-# 37. Final deployment checklist
+# 30. Recommended setup for you
 
-Before going live:
+Start with this:
 
-- [ ] Git repository created
-- [ ] Coolify application created
-- [ ] Dockerfile build pack selected
-- [ ] Application port set to `3000`
-- [ ] Redis service created
-- [ ] `REDIS_URL` configured
-- [ ] `/media` mounted to the actual video directory
-- [ ] `/data` mounted as persistent storage
-- [ ] Strong `ADMIN_PASSWORD` configured
-- [ ] Application deployed successfully
-- [ ] Login works
-- [ ] Library appears
-- [ ] Thumbnails generate
-- [ ] Video plays
-- [ ] Seeking works
-- [ ] Continue Watching works
-- [ ] Favorites work
-- [ ] History works
-- [ ] Subtitles work
-- [ ] Transcoding works
-- [ ] Transcoded cache persists
-- [ ] Domain DNS points to the correct server
-- [ ] NGINX configured if using external NGINX
-- [ ] HTTPS configured
-- [ ] Ports 80/443 available
-- [ ] Application port not unnecessarily exposed publicly
-- [ ] Redis not exposed publicly
-- [ ] Media mount is read-only where possible
+```text
+                 YOUR DOMAIN
+                     │
+                     ▼
+               ┌───────────┐
+               │  Coolify  │
+               │   Proxy   │
+               └─────┬─────┘
+                     │
+                     ▼
+          ┌────────────────────┐
+          │ VPS Video Library  │
+          │      :3000         │
+          └──────┬─────┬──────┘
+                 │     │
+          ┌──────┘     └──────┐
+          ▼                   ▼
+       /media               /data
+          │                   │
+     Your videos        DB + caches
 
----
+                         Redis
+```
 
-## Coolify documentation references
+Get this working first.
 
-Coolify's current documentation confirms that Dockerfile applications can use a custom Dockerfile, that the application port must match the port the container listens on, and that persistent storage/environment variables are configured through the application settings. citeturn0search0turn0search2
+**Do not add NGINX until this works.**
 
-Coolify also supports assigning FQDNs directly to applications and automatically configuring HTTPS through its reverse proxy. citeturn0search1turn0search6
-
-If you use a separate NGINX instance as described above, keep the application port private where practical and expose only the NGINX HTTP/HTTPS endpoints. citeturn0search8
+Once the application is confirmed working, NGINX can be placed in front without changing the application itself.
